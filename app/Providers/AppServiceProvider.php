@@ -14,6 +14,7 @@ use App\Repositories\TaskRepository;
 use App\Repositories\UserRepository;
 use App\Services\DashboardService;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Livewire\Livewire;
 
@@ -35,6 +36,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        if ($this->app->environment('production')) {
+            URL::forceRootUrl((string) config('app.url'));
+            URL::forceScheme('https');
+        }
+
         Gate::before(static function ($user, string $ability): ?bool {
             return method_exists($user, 'hasRole') && $user->hasRole('admin') ? true : null;
         });
