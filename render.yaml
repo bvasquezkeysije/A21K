@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: a21k
+    env: docker
+    plan: free
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DB_HOST
+        value: a21k-a21k.i.aivencloud.com
+      - key: DB_PORT
+        value: "16015"
+      - key: DB_DATABASE
+        value: db_a21k
+      - key: DB_USERNAME
+        value: avnadmin
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSLMODE
+        value: require
+      - key: RUN_MIGRATIONS
+        value: "true"
