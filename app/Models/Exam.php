@@ -16,7 +16,18 @@ class Exam extends Model
         'name',
         'source_file_path',
         'questions_count',
+        'practice_feedback_enabled',
+        'practice_order_mode',
+        'practice_repeat_until_correct',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'practice_feedback_enabled' => 'boolean',
+            'practice_repeat_until_correct' => 'boolean',
+        ];
+    }
 
     public function user(): BelongsTo
     {

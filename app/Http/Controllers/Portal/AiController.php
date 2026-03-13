@@ -81,9 +81,9 @@ class AiController extends Controller
                 ->whereKey($manualExamId)
                 ->with([
                     'questions' => fn ($query) => $query
+                        ->with('options:id,question_id,option_text,is_correct')
                         ->withCount('options')
-                        ->latest('id')
-                        ->limit(8),
+                        ->latest('id'),
                 ])
                 ->first();
         }
@@ -300,8 +300,16 @@ class AiController extends Controller
                     'question_text' => $createdQuestion?->question_text,
                     'question_type' => $createdQuestion?->question_type,
                     'question_type_label' => $createdQuestion?->question_type === 'multiple_choice' ? 'Seleccion' : 'Escrita',
+                    'correct_answer' => (string) ($createdQuestion?->correct_answer ?? ''),
+                    'explanation' => (string) ($createdQuestion?->explanation ?? ''),
                     'points' => (int) ($createdQuestion?->points ?? 0),
                     'temporizador_segundos' => (int) ($createdQuestion?->temporizador_segundos ?? $createdQuestion?->time_limit ?? 0),
+                    'timer_enabled' => (bool) ($createdQuestion?->timer_enabled ?? false),
+                    'option_a' => (string) ($optionsByKey['a'] ?? ''),
+                    'option_b' => (string) ($optionsByKey['b'] ?? ''),
+                    'option_c' => (string) ($optionsByKey['c'] ?? ''),
+                    'option_d' => (string) ($optionsByKey['d'] ?? ''),
+                    'correct_option' => $correctOption,
                 ],
             ], 201);
         }
@@ -309,6 +317,115 @@ class AiController extends Controller
         return redirect()
             ->route('portal.forms', ['manual_exam' => $exam->id])
             ->with('message', 'Pregunta agregada correctamente.');
+    }
+
+    public function updateManualExamQuestion(Request $request, Exam $exam, Question $question): RedirectResponse|JsonResponse
+    {
+        $this->ensureExamOwnership($request, $exam);
+        abort_unless((int) $question->exam_id === (int) $exam->id, 404);
+
+        $validated = $request->validateWithBag('manualQuestionEdit', [
+            'edit_question_id' => ['required', 'integer'],
+            'edit_question_text' => ['required', 'string', 'max:5000'],
+            'edit_question_type' => ['required', 'in:multiple_choice,written'],
+            'edit_correct_answer' => ['nullable', 'string', 'max:5000'],
+            'edit_explanation' => ['nullable', 'string', 'max:5000'],
+            'edit_points' => ['required', 'integer', 'min:1', 'max:1000'],
+            'edit_temporizador_segundos' => ['required', 'integer', 'min:1', 'max:86400'],
+            'edit_timer_enabled' => ['nullable', 'boolean'],
+            'edit_option_a' => ['nullable', 'string', 'max:1000'],
+            'edit_option_b' => ['nullable', 'string', 'max:1000'],
+            'edit_option_c' => ['nullable', 'string', 'max:1000'],
+            'edit_option_d' => ['nullable', 'string', 'max:1000'],
+            'edit_correct_option' => ['nullable', 'in:a,b,c,d'],
+        ]);
+
+        abort_unless((int) $validated['edit_question_id'] === (int) $question->id, 422);
+
+        $questionType = $validated['edit_question_type'];
+        $optionsByKey = collect(['a', 'b', 'c', 'd'])
+            ->mapWithKeys(fn (string $key): array => [$key => trim((string) ($validated["edit_option_{$key}"] ?? ''))])
+            ->filter(fn (string $optionText): bool => $optionText !== '')
+            ->all();
+
+        $correctOption = $validated['edit_correct_option'] ?? null;
+        $correctAnswer = trim((string) ($validated['edit_correct_answer'] ?? ''));
+
+        if ($questionType === 'multiple_choice') {
+            if (count($optionsByKey) < 2) {
+                throw ValidationException::withMessages([
+                    'edit_option_a' => 'Debes ingresar al menos 2 opciones para preguntas de seleccion.',
+                ])->errorBag('manualQuestionEdit');
+            }
+
+            if ($correctOption === null || ! array_key_exists($correctOption, $optionsByKey)) {
+                throw ValidationException::withMessages([
+                    'edit_correct_option' => 'Selecciona una opcion correcta que exista en las opciones ingresadas.',
+                ])->errorBag('manualQuestionEdit');
+            }
+
+            $correctAnswer = $optionsByKey[$correctOption];
+        } elseif ($correctAnswer === '') {
+            throw ValidationException::withMessages([
+                'edit_correct_answer' => 'La respuesta correcta es obligatoria para preguntas escritas.',
+            ])->errorBag('manualQuestionEdit');
+        }
+
+        DB::transaction(function () use ($exam, $question, $validated, $questionType, $correctAnswer, $optionsByKey, $correctOption): void {
+            $question->update([
+                'question_text' => trim($validated['edit_question_text']),
+                'question_type' => $questionType,
+                'correct_answer' => $correctAnswer,
+                'explanation' => trim((string) ($validated['edit_explanation'] ?? '')) !== '' ? trim((string) $validated['edit_explanation']) : null,
+                'points' => (int) $validated['edit_points'],
+                'time_limit' => (int) $validated['edit_temporizador_segundos'],
+                'temporizador_segundos' => (int) $validated['edit_temporizador_segundos'],
+                'timer_enabled' => (bool) ($validated['edit_timer_enabled'] ?? false),
+            ]);
+
+            $question->options()->delete();
+
+            if ($questionType === 'multiple_choice') {
+                foreach ($optionsByKey as $key => $optionText) {
+                    Option::create([
+                        'question_id' => $question->id,
+                        'option_text' => $optionText,
+                        'is_correct' => $key === $correctOption,
+                    ]);
+                }
+            }
+
+            $exam->update([
+                'questions_count' => $exam->questions()->count(),
+            ]);
+        });
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => 'Pregunta actualizada correctamente.',
+                'questions_count' => (int) $exam->questions_count,
+                'question' => [
+                    'id' => (int) $question->id,
+                    'question_text' => (string) $question->question_text,
+                    'question_type' => (string) $question->question_type,
+                    'question_type_label' => $question->question_type === 'multiple_choice' ? 'Seleccion' : 'Escrita',
+                    'correct_answer' => (string) ($question->correct_answer ?? ''),
+                    'explanation' => (string) ($question->explanation ?? ''),
+                    'points' => (int) $question->points,
+                    'temporizador_segundos' => (int) ($question->temporizador_segundos ?? $question->time_limit ?? 0),
+                    'timer_enabled' => (bool) $question->timer_enabled,
+                    'option_a' => (string) ($optionsByKey['a'] ?? ''),
+                    'option_b' => (string) ($optionsByKey['b'] ?? ''),
+                    'option_c' => (string) ($optionsByKey['c'] ?? ''),
+                    'option_d' => (string) ($optionsByKey['d'] ?? ''),
+                    'correct_option' => $correctOption,
+                ],
+            ]);
+        }
+
+        return redirect()
+            ->route('portal.forms', ['manual_exam' => $exam->id])
+            ->with('message', 'Pregunta actualizada correctamente.');
     }
 
     public function storeChat(Request $request): RedirectResponse
@@ -628,11 +745,73 @@ class AiController extends Controller
         ]);
     }
 
+    public function updateExamPracticeSettings(Request $request, Exam $exam): RedirectResponse
+    {
+        $this->ensureExamOwnership($request, $exam);
+
+        $validated = $request->validateWithBag('practiceSettings', [
+            'practice_feedback_mode' => ['required', 'in:with_feedback,without_feedback'],
+            'practice_order_mode' => ['required', 'in:ordered,random'],
+            'practice_progress_mode' => ['required', 'in:repeat_until_correct,allow_incorrect_pass'],
+        ]);
+
+        $exam->update([
+            'practice_feedback_enabled' => $validated['practice_feedback_mode'] === 'with_feedback',
+            'practice_order_mode' => $validated['practice_order_mode'],
+            'practice_repeat_until_correct' => $validated['practice_progress_mode'] === 'repeat_until_correct',
+        ]);
+
+        $queryParams = array_filter([
+            'q' => trim((string) $request->query('q', '')),
+            'from_date' => trim((string) $request->query('from_date', '')),
+            'to_date' => trim((string) $request->query('to_date', '')),
+            'per_page' => (int) $request->query('per_page', self::EXAMS_PER_PAGE_OPTIONS[0]),
+            'page' => (int) $request->query('page', 1) > 1 ? (int) $request->query('page') : null,
+            'manual_exam' => (int) $request->query('manual_exam', 0),
+        ], static fn ($value) => $value !== '' && $value !== 0 && $value !== null);
+
+        return redirect()
+            ->route('portal.forms', $queryParams)
+            ->with('message', 'Configuracion guardada. Al iniciar repaso se aplicara automaticamente.');
+    }
+
     public function startExamPractice(Request $request, Exam $exam): RedirectResponse
     {
         $this->ensureExamOwnership($request, $exam);
 
-        $totalQuestions = $exam->questions()->count();
+        $validated = $request->validate([
+            'practice_feedback_mode' => ['nullable', 'in:with_feedback,without_feedback'],
+            'practice_order_mode' => ['nullable', 'in:ordered,random'],
+            'practice_progress_mode' => ['nullable', 'in:repeat_until_correct,allow_incorrect_pass'],
+            'restart' => ['nullable', 'boolean'],
+        ]);
+
+        $defaultFeedbackMode = ($exam->practice_feedback_enabled ?? true) ? 'with_feedback' : 'without_feedback';
+        $defaultOrderMode = in_array((string) ($exam->practice_order_mode ?? 'ordered'), ['ordered', 'random'], true)
+            ? (string) $exam->practice_order_mode
+            : 'ordered';
+        $defaultProgressMode = ($exam->practice_repeat_until_correct ?? false) ? 'repeat_until_correct' : 'allow_incorrect_pass';
+
+        $feedbackMode = $validated['practice_feedback_mode'] ?? $defaultFeedbackMode;
+        $orderMode = $validated['practice_order_mode'] ?? $defaultOrderMode;
+        $progressMode = $validated['practice_progress_mode'] ?? $defaultProgressMode;
+        $feedbackEnabled = $feedbackMode === 'with_feedback';
+        $repeatUntilCorrect = $progressMode === 'repeat_until_correct';
+
+        $questionIdsQuery = $exam->questions();
+        if ($orderMode === 'random') {
+            $questionIdsQuery->inRandomOrder();
+        } else {
+            $questionIdsQuery->orderBy('id');
+        }
+
+        $questionIds = $questionIdsQuery
+            ->pluck('id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+
+        $totalQuestions = count($questionIds);
         $restartRequested = $request->boolean('restart');
 
         if ($totalQuestions === 0) {
@@ -689,8 +868,9 @@ class AiController extends Controller
 
             if ($openAttempt) {
                 $nextPosition = $this->resolveNextPracticePosition($exam, $openAttempt);
+                $attemptQuestionCount = count($this->resolveAttemptQuestionIds($exam, $openAttempt));
 
-                if ($nextPosition > $totalQuestions && $openAttempt !== null) {
+                if ($nextPosition > $attemptQuestionCount && $openAttempt !== null) {
                     $this->finalizeAttemptMetrics($openAttempt->fresh(['exam.questions', 'answers']));
 
                 return redirect()->route('portal.ai.exams.practice.result', [
@@ -710,6 +890,10 @@ class AiController extends Controller
         $attempt = ExamAttempt::create([
             'exam_id' => $exam->id,
             'user_id' => $request->user()->id,
+            'question_ids' => $questionIds,
+            'questions_order_mode' => $orderMode,
+            'feedback_enabled' => $feedbackEnabled,
+            'repeat_until_correct' => $repeatUntilCorrect,
             'total_questions' => $totalQuestions,
             'started_at' => now(),
         ]);
@@ -721,14 +905,70 @@ class AiController extends Controller
         ])->with('message', 'Nuevo repaso iniciado.');
     }
 
+    public function retryIncorrectExamPractice(Request $request, Exam $exam, ExamAttempt $attempt): RedirectResponse
+    {
+        $this->ensureAttemptOwnership($request, $exam, $attempt);
+
+        $this->finalizeAttemptMetrics($attempt->fresh(['exam.questions', 'answers']));
+        $attempt->refresh();
+
+        $sourceQuestionIds = $this->resolveAttemptQuestionIds($exam, $attempt);
+
+        if ($sourceQuestionIds === []) {
+            return redirect()
+                ->route('portal.ai.exams.practice.result', ['exam' => $exam, 'attempt' => $attempt])
+                ->with('error', 'No hay preguntas disponibles para repetir.');
+        }
+
+        $correctQuestionIds = $attempt->answers()
+            ->where('is_correct', true)
+            ->whereIn('question_id', $sourceQuestionIds)
+            ->pluck('question_id')
+            ->map(static fn ($id): int => (int) $id)
+            ->values()
+            ->all();
+
+        $correctLookup = [];
+        foreach ($correctQuestionIds as $correctQuestionId) {
+            $correctLookup[$correctQuestionId] = true;
+        }
+
+        $questionIdsToRetry = [];
+        foreach ($sourceQuestionIds as $questionId) {
+            if (! isset($correctLookup[$questionId])) {
+                $questionIdsToRetry[] = $questionId;
+            }
+        }
+
+        if ($questionIdsToRetry === []) {
+            return redirect()
+                ->route('portal.ai.exams.practice.result', ['exam' => $exam, 'attempt' => $attempt])
+                ->with('message', 'Excelente: no tienes preguntas incorrectas o pendientes para repetir.');
+        }
+
+        $retryAttempt = ExamAttempt::create([
+            'exam_id' => $exam->id,
+            'user_id' => $request->user()->id,
+            'question_ids' => $questionIdsToRetry,
+            'questions_order_mode' => (string) ($attempt->questions_order_mode ?: 'ordered'),
+            'feedback_enabled' => (bool) ($attempt->feedback_enabled ?? true),
+            'repeat_until_correct' => (bool) ($attempt->repeat_until_correct ?? false),
+            'total_questions' => count($questionIdsToRetry),
+            'started_at' => now(),
+        ]);
+
+        return redirect()->route('portal.ai.exams.practice.question', [
+            'exam' => $exam,
+            'attempt' => $retryAttempt,
+            'position' => 1,
+        ])->with('message', 'Repaso de preguntas falladas iniciado.');
+    }
+
     public function showExamPracticeQuestion(Request $request, Exam $exam, ExamAttempt $attempt, int $position): View|RedirectResponse
     {
         $this->ensureAttemptOwnership($request, $exam, $attempt);
 
-        $questions = $exam->questions()
-            ->with('options')
-            ->orderBy('id')
-            ->get();
+        $questions = $this->resolveAttemptQuestions($exam, $attempt, true);
 
         $totalQuestions = $questions->count();
 
@@ -746,6 +986,28 @@ class AiController extends Controller
         }
 
         $question = $questions[$position - 1];
+        $existingAnswer = $attempt->answers()
+            ->where('question_id', $question->id)
+            ->first();
+        $feedbackEnabled = (bool) ($attempt->feedback_enabled ?? true);
+        $repeatUntilCorrect = (bool) ($attempt->repeat_until_correct ?? false);
+        $feedbackMode = $feedbackEnabled && $request->boolean('feedback') && $existingAnswer !== null;
+        $mustRepeatCurrentQuestion = $feedbackMode && $repeatUntilCorrect && (! $existingAnswer || $existingAnswer->is_correct !== true);
+        $nextPositionDefault = $mustRepeatCurrentQuestion ? $position : ($position + 1);
+        $nextPositionAfterFeedback = (int) $request->query('next', $nextPositionDefault);
+        $minimumNextPosition = $mustRepeatCurrentQuestion ? $position : ($position + 1);
+
+        if ($nextPositionAfterFeedback < $minimumNextPosition) {
+            $nextPositionAfterFeedback = $minimumNextPosition;
+        }
+
+        $continueUrl = $nextPositionAfterFeedback > $totalQuestions
+            ? route('portal.ai.exams.practice.result', ['exam' => $exam, 'attempt' => $attempt])
+            : route('portal.ai.exams.practice.question', [
+                'exam' => $exam,
+                'attempt' => $attempt,
+                'position' => $nextPositionAfterFeedback,
+            ]);
 
         return view('pages.exam-practice-question', [
             'exam' => $exam,
@@ -754,9 +1016,14 @@ class AiController extends Controller
             'position' => $position,
             'totalQuestions' => $totalQuestions,
             'nextPosition' => $position + 1,
-            'existingAnswer' => $attempt->answers()
-                ->where('question_id', $question->id)
-                ->first(),
+            'existingAnswer' => $existingAnswer,
+            'feedbackMode' => $feedbackMode,
+            'feedbackEnabled' => $feedbackEnabled,
+            'repeatUntilCorrect' => $repeatUntilCorrect,
+            'mustRepeatCurrentQuestion' => $mustRepeatCurrentQuestion,
+            'questionOrderMode' => (string) ($attempt->questions_order_mode ?: 'ordered'),
+            'continueUrl' => $continueUrl,
+            'continueToResult' => $nextPositionAfterFeedback > $totalQuestions,
         ]);
     }
 
@@ -772,7 +1039,7 @@ class AiController extends Controller
             'time_spent_seconds' => ['nullable', 'integer', 'min:0', 'max:86400'],
         ]);
 
-        $questions = $exam->questions()->orderBy('id')->get();
+        $questions = $this->resolveAttemptQuestions($exam, $attempt);
         $totalQuestions = $questions->count();
 
         if ($position < 1 || $position > $totalQuestions) {
@@ -821,19 +1088,40 @@ class AiController extends Controller
                 ->with('message', 'Progreso guardado. Puedes continuar el repaso cuando quieras.');
         }
 
-        if ($position >= $totalQuestions) {
-            $this->finalizeAttemptMetrics($attempt->fresh(['exam.questions', 'answers']));
+        $feedbackEnabled = (bool) ($attempt->feedback_enabled ?? true);
+        $repeatUntilCorrect = (bool) ($attempt->repeat_until_correct ?? false);
+        $canAdvance = ! $repeatUntilCorrect || ($isCorrect === true);
+        $nextPosition = $position + 1;
 
-            return redirect()->route('portal.ai.exams.practice.result', [
+        if (! $feedbackEnabled) {
+            if (! $canAdvance) {
+                return redirect()->route('portal.ai.exams.practice.question', [
+                    'exam' => $exam,
+                    'attempt' => $attempt,
+                    'position' => $position,
+                ])->with('error', 'Respuesta incorrecta. Debes responder correctamente para avanzar.');
+            }
+
+            if ($nextPosition > $totalQuestions) {
+                return redirect()->route('portal.ai.exams.practice.result', [
+                    'exam' => $exam,
+                    'attempt' => $attempt,
+                ]);
+            }
+
+            return redirect()->route('portal.ai.exams.practice.question', [
                 'exam' => $exam,
                 'attempt' => $attempt,
+                'position' => $nextPosition,
             ]);
         }
 
         return redirect()->route('portal.ai.exams.practice.question', [
             'exam' => $exam,
             'attempt' => $attempt,
-            'position' => $position + 1,
+            'position' => $position,
+            'feedback' => 1,
+            'next' => $canAdvance ? $nextPosition : $position,
         ]);
     }
 
@@ -841,14 +1129,103 @@ class AiController extends Controller
     {
         $this->ensureAttemptOwnership($request, $exam, $attempt);
 
-        $attempt->loadMissing(['exam.questions', 'answers.question']);
+        $attempt->loadMissing(['answers.question']);
         $this->finalizeAttemptMetrics($attempt);
-        $attempt->refresh()->load(['exam.questions', 'answers.question']);
+        $attempt->refresh()->load(['answers.question']);
+        $questionsForAttempt = $this->resolveAttemptQuestions($exam, $attempt);
 
         return view('pages.exam-practice-result', [
             'exam' => $exam,
             'attempt' => $attempt,
+            'questionsForAttempt' => $questionsForAttempt,
             'answersByQuestion' => $attempt->answers->keyBy('question_id'),
+            'failedQuestionsCount' => max((int) $attempt->total_questions - (int) $attempt->correct_count, 0),
+        ]);
+    }
+
+    public function downloadExamPracticeResult(Request $request, Exam $exam, ExamAttempt $attempt): StreamedResponse
+    {
+        $this->ensureAttemptOwnership($request, $exam, $attempt);
+
+        $attempt->loadMissing(['answers.question']);
+        $this->finalizeAttemptMetrics($attempt);
+        $attempt->refresh()->load(['answers.question']);
+
+        $questionsForAttempt = $this->resolveAttemptQuestions($exam, $attempt);
+        $answersByQuestion = $attempt->answers->keyBy('question_id');
+
+        $spreadsheet = new Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Intento');
+
+        $sheet->fromArray([
+            ['Examen', $exam->name],
+            ['Intento ID', (string) $attempt->id],
+            ['Fecha', optional($attempt->finished_at ?? $attempt->created_at)->format('Y-m-d H:i:s')],
+            ['Puntaje', "{$attempt->scored_points}/{$attempt->total_points}"],
+            ['Correctas', "{$attempt->correct_count}/{$attempt->total_questions}"],
+            ['Respondidas', (string) $attempt->answered_count],
+            ['No respondio', (string) $attempt->unanswered_count],
+        ], null, 'A1');
+
+        $headerRow = 9;
+        $sheet->fromArray([[
+            '#',
+            'pregunta',
+            'tipo',
+            'estado',
+            'tu_respuesta',
+            'respuesta_correcta',
+            'puntaje',
+            'cronometro_segundos',
+            'temporizador_segundos',
+        ]], null, "A{$headerRow}");
+
+        $dataRows = [];
+
+        foreach ($questionsForAttempt as $index => $question) {
+            $answer = $answersByQuestion->get($question->id);
+            $isUnanswered = ! $answer || $answer->is_unanswered;
+            $isCorrect = $answer && $answer->is_correct === true;
+
+            $status = $isUnanswered
+                ? 'No respondio'
+                : ($isCorrect ? 'Correcta' : 'Incorrecta');
+
+            $dataRows[] = [
+                $index + 1,
+                $question->question_text,
+                $question->question_type === 'multiple_choice' ? 'Seleccion' : 'Escrita',
+                $status,
+                $answer?->selected_answer ?? '-',
+                $question->correct_answer,
+                (int) $question->points,
+                (int) ($answer?->cronometro_segundos ?? $answer?->time_spent_seconds ?? 0),
+                (int) ($question->temporizador_segundos ?? $question->time_limit),
+            ];
+        }
+
+        if ($dataRows !== []) {
+            $sheet->fromArray($dataRows, null, 'A'.($headerRow + 1));
+        }
+
+        foreach (range(1, 9) as $columnIndex) {
+            $columnLetter = Coordinate::stringFromColumnIndex($columnIndex);
+            $sheet->getColumnDimension($columnLetter)->setAutoSize(true);
+        }
+
+        $safeExamName = Str::of($exam->name)->ascii()->snake('_');
+        $filename = "intento_{$safeExamName}_{$attempt->id}.xlsx";
+
+        return response()->streamDownload(function () use ($spreadsheet): void {
+            try {
+                $writer = new Xlsx($spreadsheet);
+                $writer->save('php://output');
+            } finally {
+                $spreadsheet->disconnectWorksheets();
+            }
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         ]);
     }
 
@@ -870,22 +1247,28 @@ class AiController extends Controller
 
     private function resolveNextPracticePosition(Exam $exam, ExamAttempt $attempt): int
     {
-        $questionIds = $exam->questions()
-            ->orderBy('id')
-            ->pluck('id')
-            ->values();
+        $questionIds = collect($this->resolveAttemptQuestionIds($exam, $attempt));
+        $repeatUntilCorrect = (bool) ($attempt->repeat_until_correct ?? false);
 
         if ($questionIds->isEmpty()) {
             return 1;
         }
 
-        $answeredLookup = [];
-        foreach ($attempt->answers()->pluck('question_id') as $questionId) {
-            $answeredLookup[(int) $questionId] = true;
+        $completedLookup = [];
+        if ($repeatUntilCorrect) {
+            foreach ($attempt->answers()->get(['question_id', 'is_correct']) as $answer) {
+                if ($answer->is_correct === true) {
+                    $completedLookup[(int) $answer->question_id] = true;
+                }
+            }
+        } else {
+            foreach ($attempt->answers()->pluck('question_id') as $questionId) {
+                $completedLookup[(int) $questionId] = true;
+            }
         }
 
         foreach ($questionIds as $index => $questionId) {
-            if (! isset($answeredLookup[(int) $questionId])) {
+            if (! isset($completedLookup[(int) $questionId])) {
                 return $index + 1;
             }
         }
@@ -895,13 +1278,20 @@ class AiController extends Controller
 
     private function finalizeAttemptMetrics(ExamAttempt $attempt): void
     {
-        $attempt->loadMissing(['exam.questions:id,exam_id,points', 'answers:id,exam_attempt_id,question_id,is_correct,is_unanswered']);
+        $attempt->loadMissing(['exam:id', 'answers:id,exam_attempt_id,question_id,is_correct,is_unanswered']);
 
-        $questionPoints = $attempt->exam->questions->pluck('points', 'id');
-        $totalQuestions = $attempt->exam->questions->count();
-        $totalPoints = (int) $attempt->exam->questions->sum('points');
-        $correctAnswers = $attempt->answers->filter(fn (ExamAttemptAnswer $answer) => $answer->is_correct === true);
-        $answeredCount = $attempt->answers->filter(fn (ExamAttemptAnswer $answer) => $answer->is_unanswered === false)->count();
+        $questionIds = $this->resolveAttemptQuestionIds($attempt->exam, $attempt);
+        $totalQuestions = count($questionIds);
+
+        $attemptQuestions = $attempt->exam->questions()
+            ->whereIn('id', $questionIds)
+            ->get(['id', 'points']);
+
+        $questionPoints = $attemptQuestions->pluck('points', 'id');
+        $totalPoints = (int) $attemptQuestions->sum('points');
+        $attemptAnswers = $attempt->answers->whereIn('question_id', $questionIds)->values();
+        $correctAnswers = $attemptAnswers->filter(fn (ExamAttemptAnswer $answer) => $answer->is_correct === true);
+        $answeredCount = $attemptAnswers->filter(fn (ExamAttemptAnswer $answer) => $answer->is_unanswered === false)->count();
         $correctCount = $correctAnswers->count();
         $unansweredCount = max($totalQuestions - $answeredCount, 0);
 
@@ -919,6 +1309,59 @@ class AiController extends Controller
             'scored_points' => $scoredPoints,
             'finished_at' => $attempt->finished_at ?? now(),
         ]);
+    }
+
+    private function resolveAttemptQuestionIds(Exam $exam, ExamAttempt $attempt): array
+    {
+        $storedQuestionIds = collect($attempt->question_ids ?? [])
+            ->map(static fn ($id): int => (int) $id)
+            ->filter(static fn (int $id): bool => $id > 0)
+            ->values();
+
+        if ($storedQuestionIds->isEmpty()) {
+            return $exam->questions()
+                ->orderBy('id')
+                ->pluck('id')
+                ->map(static fn ($id): int => (int) $id)
+                ->values()
+                ->all();
+        }
+
+        $validQuestionLookup = [];
+        foreach ($exam->questions()->whereIn('id', $storedQuestionIds->all())->pluck('id') as $questionId) {
+            $validQuestionLookup[(int) $questionId] = true;
+        }
+
+        $questionIds = [];
+        foreach ($storedQuestionIds as $questionId) {
+            if (isset($validQuestionLookup[$questionId])) {
+                $questionIds[] = $questionId;
+            }
+        }
+
+        return $questionIds;
+    }
+
+    private function resolveAttemptQuestions(Exam $exam, ExamAttempt $attempt, bool $withOptions = false)
+    {
+        $questionIds = $this->resolveAttemptQuestionIds($exam, $attempt);
+
+        if ($questionIds === []) {
+            return collect();
+        }
+
+        $query = $exam->questions()->whereIn('id', $questionIds);
+
+        if ($withOptions) {
+            $query->with('options');
+        }
+
+        $questionsById = $query->get()->keyBy('id');
+
+        return collect($questionIds)
+            ->map(static fn (int $questionId) => $questionsById->get($questionId))
+            ->filter()
+            ->values();
     }
 
     private function buildHeaderMap(array $headerRow): array
@@ -1094,6 +1537,8 @@ class AiController extends Controller
         return (string) Str::of($value)
             ->ascii()
             ->lower()
-            ->squish();
+            ->replaceMatches('/[^a-z0-9]+/', ' ')
+            ->squish()
+            ->replace(' ', '');
     }
 }

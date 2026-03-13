@@ -7,10 +7,19 @@
             </div>
             <div class="d-flex gap-2">
                 <a href="{{ route('portal.forms') }}" class="btn btn-outline-secondary">Volver a Examenes</a>
+                <a href="{{ route('portal.ai.exams.practice.download', ['exam' => $exam, 'attempt' => $attempt]) }}" class="btn btn-outline-success">
+                    Descargar Excel
+                </a>
                 <form method="POST" action="{{ route('portal.ai.exams.practice.start', $exam) }}">
                     @csrf
                     <button type="submit" class="btn btn-primary">Reintentar</button>
                 </form>
+                @if ($failedQuestionsCount > 0)
+                    <form method="POST" action="{{ route('portal.ai.exams.practice.retry-incorrect', ['exam' => $exam, 'attempt' => $attempt]) }}">
+                        @csrf
+                        <button type="submit" class="btn btn-outline-primary">Repetir falladas</button>
+                    </form>
+                @endif
             </div>
         </div>
 
@@ -65,7 +74,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($exam->questions->sortBy('id')->values() as $index => $question)
+                            @foreach ($questionsForAttempt as $index => $question)
                                 @php
                                     $answer = $answersByQuestion->get($question->id);
                                     $isUnanswered = ! $answer || $answer->is_unanswered;

@@ -11,6 +11,10 @@ class ExamAttempt extends Model
     protected $fillable = [
         'exam_id',
         'user_id',
+        'question_ids',
+        'questions_order_mode',
+        'feedback_enabled',
+        'repeat_until_correct',
         'total_questions',
         'answered_count',
         'unanswered_count',
@@ -24,6 +28,9 @@ class ExamAttempt extends Model
     protected function casts(): array
     {
         return [
+            'question_ids' => 'array',
+            'feedback_enabled' => 'boolean',
+            'repeat_until_correct' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

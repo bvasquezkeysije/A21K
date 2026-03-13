@@ -214,6 +214,16 @@
                                         {{ $hasOpenAttempt ? 'Continuar repaso' : 'Iniciar repaso' }}
                                     </button>
                                 </form>
+                                @if (! $hasOpenAttempt)
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-primary exam-card-action-btn"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#practiceSettingsModal-{{ $exam->id }}"
+                                    >
+                                        Configuracion
+                                    </button>
+                                @endif
                                 @if ($hasOpenAttempt)
                                     <button
                                         type="button"
@@ -235,6 +245,85 @@
                             </div>
                         </div>
                     </div>
+
+                    @if (! $hasOpenAttempt)
+                        @php
+                            $configuredFeedbackMode = ($exam->practice_feedback_enabled ?? true) ? 'with_feedback' : 'without_feedback';
+                            $configuredOrderMode = (string) ($exam->practice_order_mode ?? 'ordered') === 'random' ? 'random' : 'ordered';
+                            $configuredProgressMode = ($exam->practice_repeat_until_correct ?? false) ? 'repeat_until_correct' : 'allow_incorrect_pass';
+                        @endphp
+                        <div class="modal fade" id="practiceSettingsModal-{{ $exam->id }}" tabindex="-1" aria-labelledby="practiceSettingsModalLabel-{{ $exam->id }}" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content border-0 shadow">
+                                    <form method="POST" action="{{ route('portal.ai.exams.practice.settings.update', array_merge(['exam' => $exam], array_filter($listQuery + ['manual_exam' => request('manual_exam')], fn ($value) => $value !== null && $value !== ''))) }}">
+                                        @csrf
+                                        @method('PATCH')
+                                        <div class="modal-header">
+                                            <h5 class="modal-title" id="practiceSettingsModalLabel-{{ $exam->id }}">Configuracion de repaso</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <p class="text-muted mb-3">
+                                                Guarda tus preferencias. Se aplicaran cuando inicies el repaso.
+                                            </p>
+
+                                            <div class="mb-4">
+                                                <div class="fw-semibold mb-2">Verificacion y explicacion</div>
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="radio" name="practice_feedback_mode" id="practice_feedback_mode_with_{{ $exam->id }}" value="with_feedback" @checked($configuredFeedbackMode === 'with_feedback')>
+                                                    <label class="form-check-label" for="practice_feedback_mode_with_{{ $exam->id }}">
+                                                        Mostrar verificacion y explicacion en cada pregunta
+                                                    </label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="practice_feedback_mode" id="practice_feedback_mode_without_{{ $exam->id }}" value="without_feedback" @checked($configuredFeedbackMode === 'without_feedback')>
+                                                    <label class="form-check-label" for="practice_feedback_mode_without_{{ $exam->id }}">
+                                                        Avanzar directo sin verificacion inmediata
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <div class="fw-semibold mb-2">Orden de preguntas</div>
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="radio" name="practice_order_mode" id="practice_order_mode_ordered_{{ $exam->id }}" value="ordered" @checked($configuredOrderMode === 'ordered')>
+                                                    <label class="form-check-label" for="practice_order_mode_ordered_{{ $exam->id }}">
+                                                        En orden
+                                                    </label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="practice_order_mode" id="practice_order_mode_random_{{ $exam->id }}" value="random" @checked($configuredOrderMode === 'random')>
+                                                    <label class="form-check-label" for="practice_order_mode_random_{{ $exam->id }}">
+                                                        Aleatorio
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <div class="mt-4">
+                                                <div class="fw-semibold mb-2">Avance cuando la respuesta es incorrecta</div>
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="radio" name="practice_progress_mode" id="practice_progress_mode_repeat_{{ $exam->id }}" value="repeat_until_correct" @checked($configuredProgressMode === 'repeat_until_correct')>
+                                                    <label class="form-check-label" for="practice_progress_mode_repeat_{{ $exam->id }}">
+                                                        Repetir la pregunta hasta responder correctamente
+                                                    </label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="practice_progress_mode" id="practice_progress_mode_allow_{{ $exam->id }}" value="allow_incorrect_pass" @checked($configuredProgressMode === 'allow_incorrect_pass')>
+                                                    <label class="form-check-label" for="practice_progress_mode_allow_{{ $exam->id }}">
+                                                        Permitir pasar aunque la respuesta este mal
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="submit" class="btn btn-primary">Guardar</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    @endif
 
                     <div class="modal fade" id="editExamNameModal-{{ $exam->id }}" tabindex="-1" aria-labelledby="editExamNameModalLabel-{{ $exam->id }}" aria-hidden="true">
                         <div class="modal-dialog modal-dialog-centered">
@@ -561,17 +650,72 @@
 
                         <hr class="my-4">
 
-                        <h6 class="mb-3">Ultimas preguntas agregadas</h6>
-                        <div id="manualQuestionsList" class="@if($activeManualExam->questions->isEmpty()) d-none @endif">
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                            <h6 class="mb-0">Preguntas agregadas</h6>
+                            <div class="d-flex align-items-center gap-2">
+                                <label for="manualQuestionsOrder" class="small text-muted mb-0">Ordenar</label>
+                                <select id="manualQuestionsOrder" class="form-select form-select-sm">
+                                    <option value="desc">Ultimo a 1</option>
+                                    <option value="asc">1 a ultimo</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div
+                            id="manualQuestionsList"
+                            class="@if($activeManualExam->questions->isEmpty()) d-none @endif overflow-auto pe-1"
+                            style="max-height: 420px;"
+                        >
                             @foreach ($activeManualExam->questions as $question)
-                                <div class="border rounded p-3 mb-2" data-question-item>
+                                @php
+                                    $questionOptions = $question->options->sortBy('id')->values();
+                                    $optionA = (string) ($questionOptions->get(0)?->option_text ?? '');
+                                    $optionB = (string) ($questionOptions->get(1)?->option_text ?? '');
+                                    $optionC = (string) ($questionOptions->get(2)?->option_text ?? '');
+                                    $optionD = (string) ($questionOptions->get(3)?->option_text ?? '');
+                                    $correctOption = '';
+                                    foreach ($questionOptions as $optionIndex => $optionModel) {
+                                        if ($optionModel->is_correct) {
+                                            $correctOption = ['a', 'b', 'c', 'd'][$optionIndex] ?? '';
+                                            break;
+                                        }
+                                    }
+                                    $questionPayload = [
+                                        'id' => (int) $question->id,
+                                        'question_text' => (string) $question->question_text,
+                                        'question_type' => (string) $question->question_type,
+                                        'correct_answer' => (string) ($question->correct_answer ?? ''),
+                                        'explanation' => (string) ($question->explanation ?? ''),
+                                        'points' => (int) $question->points,
+                                        'temporizador_segundos' => (int) ($question->temporizador_segundos ?? $question->time_limit),
+                                        'timer_enabled' => (bool) $question->timer_enabled,
+                                        'option_a' => $optionA,
+                                        'option_b' => $optionB,
+                                        'option_c' => $optionC,
+                                        'option_d' => $optionD,
+                                        'correct_option' => $correctOption,
+                                    ];
+                                @endphp
+                                <div class="border rounded p-3 mb-2" data-question-item data-question-id="{{ $question->id }}">
                                     <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start">
-                                        <div class="fw-semibold">{{ $question->question_text }}</div>
-                                        <span class="badge text-bg-light text-uppercase">
-                                            {{ $question->question_type === 'multiple_choice' ? 'Seleccion' : 'Escrita' }}
-                                        </span>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge text-bg-secondary">#{{ $question->id }}</span>
+                                            <div class="fw-semibold" data-question-title>{{ $question->question_text }}</div>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <span class="badge text-bg-light text-uppercase" data-question-type>
+                                                {{ $question->question_type === 'multiple_choice' ? 'Seleccion' : 'Escrita' }}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                id="editQuestionBtn-{{ $question->id }}"
+                                                class="btn btn-sm btn-outline-primary js-open-edit-question"
+                                                data-question='@json($questionPayload)'
+                                            >
+                                                Editar
+                                            </button>
+                                        </div>
                                     </div>
-                                    <small class="text-muted d-block mt-1">
+                                    <small class="text-muted d-block mt-1" data-question-meta>
                                         Puntaje: {{ $question->points }} | Temporizador: {{ (int) ($question->temporizador_segundos ?? $question->time_limit) }} s
                                     </small>
                                 </div>
@@ -585,6 +729,111 @@
             </div>
         </div>
     </div>
+
+    @if ($hasActiveManualExam)
+        <div class="modal fade" id="editManualQuestionModal" tabindex="-1" aria-labelledby="editManualQuestionModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+                <div class="modal-content border-0 shadow">
+                    <form
+                        id="editManualQuestionForm"
+                        method="POST"
+                        data-action-template="{{ route('portal.ai.exams.manual.questions.update', ['exam' => $activeManualExam, 'question' => '__QUESTION__']) }}"
+                    >
+                        @csrf
+                        @method('PATCH')
+                        <input type="hidden" id="edit_question_id" name="edit_question_id" value="">
+
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="editManualQuestionModalLabel">Editar pregunta</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                        </div>
+                        <div class="modal-body">
+                            @if ($errors->manualQuestionEdit->any())
+                                <div class="alert alert-danger">
+                                    {{ $errors->manualQuestionEdit->first() }}
+                                </div>
+                            @endif
+
+                            <div class="mb-3">
+                                <label for="edit_question_text" class="form-label">Pregunta</label>
+                                <textarea id="edit_question_text" name="edit_question_text" rows="3" class="form-control" required></textarea>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="edit_question_type" class="form-label">Tipo de pregunta</label>
+                                <select id="edit_question_type" name="edit_question_type" class="form-select" required>
+                                    <option value="multiple_choice">Seleccion multiple</option>
+                                    <option value="written">Escrita</option>
+                                </select>
+                            </div>
+
+                            <div id="editManualMultipleChoiceFields">
+                                <label class="form-label">Opciones</label>
+                                <div class="mb-2">
+                                    <input type="text" id="edit_option_a" name="edit_option_a" class="form-control" placeholder="Opcion A">
+                                </div>
+                                <div class="mb-2">
+                                    <input type="text" id="edit_option_b" name="edit_option_b" class="form-control" placeholder="Opcion B">
+                                </div>
+                                <div class="mb-2">
+                                    <input type="text" id="edit_option_c" name="edit_option_c" class="form-control" placeholder="Opcion C (opcional)">
+                                </div>
+                                <div class="mb-3">
+                                    <input type="text" id="edit_option_d" name="edit_option_d" class="form-control" placeholder="Opcion D (opcional)">
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="edit_correct_option" class="form-label">Opcion correcta</label>
+                                    <select id="edit_correct_option" name="edit_correct_option" class="form-select">
+                                        <option value="">Selecciona la correcta</option>
+                                        <option value="a">A</option>
+                                        <option value="b">B</option>
+                                        <option value="c">C</option>
+                                        <option value="d">D</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div id="editManualWrittenFields" class="d-none">
+                                <div class="mb-3">
+                                    <label for="edit_correct_answer" class="form-label">Respuesta correcta</label>
+                                    <textarea id="edit_correct_answer" name="edit_correct_answer" rows="2" class="form-control" placeholder="Respuesta esperada..."></textarea>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="edit_explanation" class="form-label">Explicacion (opcional)</label>
+                                <textarea id="edit_explanation" name="edit_explanation" rows="2" class="form-control" placeholder="Explicacion para repaso..."></textarea>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-sm-6">
+                                    <label for="edit_points" class="form-label">Puntaje</label>
+                                    <input type="number" id="edit_points" name="edit_points" min="1" max="1000" class="form-control" required>
+                                </div>
+                                <div class="col-sm-6">
+                                    <label for="edit_temporizador_segundos" class="form-label">Temporizador (segundos)</label>
+                                    <input type="number" id="edit_temporizador_segundos" name="edit_temporizador_segundos" min="1" max="86400" class="form-control" required>
+                                </div>
+                            </div>
+
+                            <div class="form-check mt-3">
+                                <input type="hidden" name="edit_timer_enabled" value="0">
+                                <input class="form-check-input" type="checkbox" value="1" id="edit_timer_enabled" name="edit_timer_enabled">
+                                <label class="form-check-label" for="edit_timer_enabled">
+                                    Activar temporizador
+                                </label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-primary">Guardar cambios</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <div class="modal fade" id="uploadExamModal" tabindex="-1" aria-labelledby="uploadExamModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered modal-lg">
@@ -734,6 +983,28 @@
                 const manualQuestionsList = document.getElementById('manualQuestionsList');
                 const manualQuestionsEmpty = document.getElementById('manualQuestionsEmpty');
                 const manualQuestionsCount = document.getElementById('manualQuestionsCount');
+                const manualQuestionsOrder = document.getElementById('manualQuestionsOrder');
+                const editManualQuestionModalElement = document.getElementById('editManualQuestionModal');
+                const editManualQuestionForm = document.getElementById('editManualQuestionForm');
+                const editQuestionId = document.getElementById('edit_question_id');
+                const editQuestionText = document.getElementById('edit_question_text');
+                const editQuestionType = document.getElementById('edit_question_type');
+                const editPoints = document.getElementById('edit_points');
+                const editTemporizador = document.getElementById('edit_temporizador_segundos');
+                const editExplanation = document.getElementById('edit_explanation');
+                const editTimerEnabled = document.getElementById('edit_timer_enabled');
+                const editCorrectAnswer = document.getElementById('edit_correct_answer');
+                const editCorrectOption = document.getElementById('edit_correct_option');
+                const editOptionA = document.getElementById('edit_option_a');
+                const editOptionB = document.getElementById('edit_option_b');
+                const editOptionC = document.getElementById('edit_option_c');
+                const editOptionD = document.getElementById('edit_option_d');
+                const editManualMultipleChoiceFields = document.getElementById('editManualMultipleChoiceFields');
+                const editManualWrittenFields = document.getElementById('editManualWrittenFields');
+                const manualQuestionModalElement = document.getElementById('manualQuestionModal');
+                const shouldOpenManualQuestionModal = @json($hasActiveManualExam || $errors->manualQuestion->any());
+                const stackedEditModalZIndex = 1085;
+                const stackedEditBackdropZIndex = 1080;
 
                 const syncManualQuestionType = () => {
                     if (!manualQuestionTypeSelect || !manualMultipleChoiceFields || !manualWrittenFields) {
@@ -765,6 +1036,93 @@
                     manualQuestionFeedback.textContent = message;
                 };
 
+                const sortManualQuestionCards = () => {
+                    if (!manualQuestionsList) {
+                        return;
+                    }
+
+                    const currentOrder = manualQuestionsOrder ? manualQuestionsOrder.value : 'desc';
+                    const cards = Array.from(manualQuestionsList.querySelectorAll('[data-question-item]'));
+
+                    cards.sort((firstCard, secondCard) => {
+                        const firstId = Number(firstCard.dataset.questionId || 0);
+                        const secondId = Number(secondCard.dataset.questionId || 0);
+                        return currentOrder === 'asc' ? firstId - secondId : secondId - firstId;
+                    });
+
+                    cards.forEach((card) => manualQuestionsList.appendChild(card));
+                };
+
+                const getQuestionTypeLabel = (questionType, fallbackLabel = 'Pregunta') => {
+                    if (questionType === 'multiple_choice') {
+                        return 'Seleccion';
+                    }
+
+                    if (questionType === 'written') {
+                        return 'Escrita';
+                    }
+
+                    return fallbackLabel;
+                };
+
+                const buildQuestionDataset = (question) => JSON.stringify({
+                    id: Number(question.id ?? 0),
+                    question_text: question.question_text ?? '',
+                    question_type: question.question_type ?? 'multiple_choice',
+                    correct_answer: question.correct_answer ?? '',
+                    explanation: question.explanation ?? '',
+                    points: Number(question.points ?? 1),
+                    temporizador_segundos: Number(question.temporizador_segundos ?? 30),
+                    timer_enabled: Boolean(question.timer_enabled),
+                    option_a: question.option_a ?? '',
+                    option_b: question.option_b ?? '',
+                    option_c: question.option_c ?? '',
+                    option_d: question.option_d ?? '',
+                    correct_option: question.correct_option ?? '',
+                });
+
+                const syncEditManualQuestionType = () => {
+                    if (!editQuestionType || !editManualMultipleChoiceFields || !editManualWrittenFields) {
+                        return;
+                    }
+
+                    const isMultipleChoice = editQuestionType.value === 'multiple_choice';
+                    editManualMultipleChoiceFields.classList.toggle('d-none', !isMultipleChoice);
+                    editManualWrittenFields.classList.toggle('d-none', isMultipleChoice);
+
+                    if (editOptionA) editOptionA.required = isMultipleChoice;
+                    if (editOptionB) editOptionB.required = isMultipleChoice;
+                    if (editCorrectOption) editCorrectOption.required = isMultipleChoice;
+                    if (editCorrectAnswer) editCorrectAnswer.required = !isMultipleChoice;
+                };
+
+                const fillEditManualQuestionForm = (question) => {
+                    if (!question || !editManualQuestionForm) {
+                        return;
+                    }
+
+                    const actionTemplate = editManualQuestionForm.dataset.actionTemplate || '';
+                    if (actionTemplate && question.id) {
+                        editManualQuestionForm.action = actionTemplate.replace('__QUESTION__', String(question.id));
+                    }
+
+                    if (editQuestionId) editQuestionId.value = String(question.id ?? '');
+                    if (editQuestionText) editQuestionText.value = question.question_text ?? '';
+                    if (editQuestionType) editQuestionType.value = question.question_type ?? 'multiple_choice';
+                    if (editPoints) editPoints.value = String(question.points ?? 1);
+                    if (editTemporizador) editTemporizador.value = String(question.temporizador_segundos ?? 30);
+                    if (editExplanation) editExplanation.value = question.explanation ?? '';
+                    if (editTimerEnabled) editTimerEnabled.checked = Boolean(question.timer_enabled);
+                    if (editCorrectAnswer) editCorrectAnswer.value = question.correct_answer ?? '';
+                    if (editCorrectOption) editCorrectOption.value = question.correct_option ?? '';
+                    if (editOptionA) editOptionA.value = question.option_a ?? '';
+                    if (editOptionB) editOptionB.value = question.option_b ?? '';
+                    if (editOptionC) editOptionC.value = question.option_c ?? '';
+                    if (editOptionD) editOptionD.value = question.option_d ?? '';
+
+                    syncEditManualQuestionType();
+                };
+
                 const addManualQuestionCard = (question) => {
                     if (!manualQuestionsList || !question) {
                         return;
@@ -773,36 +1131,161 @@
                     const card = document.createElement('div');
                     card.className = 'border rounded p-3 mb-2';
                     card.dataset.questionItem = '1';
+                    card.dataset.questionId = String(question.id ?? 0);
 
                     const header = document.createElement('div');
                     header.className = 'd-flex flex-wrap gap-2 justify-content-between align-items-start';
 
+                    const headerLeft = document.createElement('div');
+                    headerLeft.className = 'd-flex align-items-center gap-2';
+
+                    const idBadge = document.createElement('span');
+                    idBadge.className = 'badge text-bg-secondary';
+                    idBadge.textContent = `#${question.id ?? ''}`;
+
                     const title = document.createElement('div');
                     title.className = 'fw-semibold';
                     title.textContent = question.question_text ?? '';
+                    title.setAttribute('data-question-title', '1');
+
+                    headerLeft.appendChild(idBadge);
+                    headerLeft.appendChild(title);
 
                     const badge = document.createElement('span');
                     badge.className = 'badge text-bg-light text-uppercase';
-                    badge.textContent = question.question_type_label ?? 'Pregunta';
+                    badge.textContent = getQuestionTypeLabel(question.question_type, question.question_type_label ?? 'Pregunta');
+                    badge.setAttribute('data-question-type', '1');
 
-                    header.appendChild(title);
-                    header.appendChild(badge);
+                    const headerRight = document.createElement('div');
+                    headerRight.className = 'd-flex align-items-center gap-2';
+                    headerRight.appendChild(badge);
+
+                    const editButton = document.createElement('button');
+                    editButton.type = 'button';
+                    editButton.className = 'btn btn-sm btn-outline-primary js-open-edit-question';
+                    editButton.textContent = 'Editar';
+                    editButton.dataset.question = buildQuestionDataset(question);
+                    headerRight.appendChild(editButton);
+
+                    header.appendChild(headerLeft);
+                    header.appendChild(headerRight);
 
                     const meta = document.createElement('small');
                     meta.className = 'text-muted d-block mt-1';
                     meta.textContent = `Puntaje: ${question.points ?? 0} | Temporizador: ${question.temporizador_segundos ?? 0} s`;
+                    meta.setAttribute('data-question-meta', '1');
 
                     card.appendChild(header);
                     card.appendChild(meta);
 
-                    manualQuestionsList.prepend(card);
+                    manualQuestionsList.appendChild(card);
                     manualQuestionsList.classList.remove('d-none');
-
-                    const existingCards = manualQuestionsList.querySelectorAll('[data-question-item]');
-                    if (existingCards.length > 8) {
-                        existingCards[existingCards.length - 1].remove();
-                    }
+                    sortManualQuestionCards();
                 };
+
+                const updateManualQuestionCard = (question) => {
+                    if (!manualQuestionsList || !question || !question.id) {
+                        return;
+                    }
+
+                    const questionId = String(question.id);
+                    const card = manualQuestionsList.querySelector(`[data-question-item][data-question-id="${questionId}"]`);
+
+                    if (!card) {
+                        addManualQuestionCard(question);
+                        return;
+                    }
+
+                    const title = card.querySelector('[data-question-title]');
+                    const typeBadge = card.querySelector('[data-question-type]');
+                    const meta = card.querySelector('[data-question-meta]');
+                    const editButton = card.querySelector('[data-question]');
+
+                    if (title) {
+                        title.textContent = question.question_text ?? '';
+                    }
+
+                    if (typeBadge) {
+                        typeBadge.textContent = getQuestionTypeLabel(question.question_type, question.question_type_label ?? 'Pregunta');
+                    }
+
+                    if (meta) {
+                        meta.textContent = `Puntaje: ${question.points ?? 0} | Temporizador: ${question.temporizador_segundos ?? 0} s`;
+                    }
+
+                    if (editButton) {
+                        editButton.dataset.question = buildQuestionDataset(question);
+                    }
+
+                    sortManualQuestionCards();
+                };
+
+                if (manualQuestionsOrder) {
+                    manualQuestionsOrder.addEventListener('change', sortManualQuestionCards);
+                }
+                sortManualQuestionCards();
+
+                if (editQuestionType) {
+                    editQuestionType.addEventListener('change', syncEditManualQuestionType);
+                    syncEditManualQuestionType();
+                }
+
+                if (manualQuestionsList && editManualQuestionModalElement && window.bootstrap) {
+                    const applyEditModalLayering = () => {
+                        editManualQuestionModalElement.style.zIndex = String(stackedEditModalZIndex);
+                        const backdrops = Array.from(document.querySelectorAll('.modal-backdrop'));
+                        const topBackdrop = backdrops[backdrops.length - 1];
+
+                        if (topBackdrop) {
+                            topBackdrop.dataset.editLayer = '1';
+                            topBackdrop.style.zIndex = String(stackedEditBackdropZIndex);
+                        }
+                    };
+
+                    const resetEditModalLayering = () => {
+                        editManualQuestionModalElement.style.removeProperty('z-index');
+                        document.querySelectorAll('.modal-backdrop[data-edit-layer="1"]').forEach((backdrop) => {
+                            backdrop.style.removeProperty('z-index');
+                            delete backdrop.dataset.editLayer;
+                        });
+                    };
+
+                    manualQuestionsList.addEventListener('click', (event) => {
+                        const trigger = event.target.closest('.js-open-edit-question');
+                        if (!trigger) {
+                            return;
+                        }
+
+                        const rawPayload = trigger.getAttribute('data-question');
+                        if (!rawPayload) {
+                            return;
+                        }
+
+                        try {
+                            fillEditManualQuestionForm(JSON.parse(rawPayload));
+                        } catch (error) {
+                            return;
+                        }
+
+                        const editModal = window.bootstrap.Modal.getOrCreateInstance(editManualQuestionModalElement);
+                        editModal.show();
+                    });
+
+                    editManualQuestionModalElement.addEventListener('show.bs.modal', () => {
+                        applyEditModalLayering();
+                    });
+
+                    editManualQuestionModalElement.addEventListener('shown.bs.modal', () => {
+                        applyEditModalLayering();
+                    });
+
+                    editManualQuestionModalElement.addEventListener('hidden.bs.modal', () => {
+                        resetEditModalLayering();
+                        if (manualQuestionModalElement && manualQuestionModalElement.classList.contains('show')) {
+                            document.body.classList.add('modal-open');
+                        }
+                    });
+                }
 
                 if (manualQuestionForm && window.fetch) {
                     manualQuestionForm.addEventListener('submit', async (event) => {
@@ -897,8 +1380,74 @@
                     });
                 }
 
-                const manualQuestionModalElement = document.getElementById('manualQuestionModal');
-                const shouldOpenManualQuestionModal = @json($hasActiveManualExam || $errors->manualQuestion->any());
+                if (editManualQuestionForm && window.fetch) {
+                    editManualQuestionForm.addEventListener('submit', async (event) => {
+                        event.preventDefault();
+
+                        editManualQuestionForm.querySelectorAll('.is-invalid').forEach((field) => field.classList.remove('is-invalid'));
+                        const submitButton = editManualQuestionForm.querySelector('button[type="submit"]');
+                        const originalButtonText = submitButton ? submitButton.textContent : '';
+
+                        if (submitButton) {
+                            submitButton.disabled = true;
+                            submitButton.textContent = 'Guardando...';
+                        }
+
+                        try {
+                            const response = await fetch(editManualQuestionForm.action, {
+                                method: 'POST',
+                                body: new FormData(editManualQuestionForm),
+                                headers: {
+                                    'Accept': 'application/json',
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                },
+                            });
+
+                            const payload = await response.json().catch(() => ({}));
+
+                            if (!response.ok) {
+                                if (response.status === 422 && payload.errors) {
+                                    const [firstField] = Object.keys(payload.errors);
+                                    const firstMessage = Object.values(payload.errors).flat()[0] ?? 'Revisa los datos de la pregunta.';
+
+                                    if (firstField) {
+                                        const invalidField = editManualQuestionForm.querySelector(`[name="${firstField}"]`);
+                                        if (invalidField) {
+                                            invalidField.classList.add('is-invalid');
+                                            invalidField.focus();
+                                        }
+                                    }
+
+                                    showManualQuestionFeedback(firstMessage, 'danger');
+                                } else {
+                                    showManualQuestionFeedback(payload.message ?? 'No se pudo actualizar la pregunta.', 'danger');
+                                }
+                                return;
+                            }
+
+                            updateManualQuestionCard(payload.question ?? null);
+
+                            if (typeof payload.questions_count === 'number' && manualQuestionsCount) {
+                                manualQuestionsCount.textContent = String(payload.questions_count);
+                            }
+
+                            showManualQuestionFeedback(payload.message ?? 'Pregunta actualizada correctamente.');
+
+                            if (window.bootstrap && editManualQuestionModalElement) {
+                                const editModal = window.bootstrap.Modal.getOrCreateInstance(editManualQuestionModalElement);
+                                editModal.hide();
+                            }
+                        } catch (error) {
+                            showManualQuestionFeedback('Error de conexion. Intenta nuevamente.', 'danger');
+                        } finally {
+                            if (submitButton) {
+                                submitButton.disabled = false;
+                                submitButton.textContent = originalButtonText;
+                            }
+                        }
+                    });
+                }
+
                 const examFiltersToggle = document.getElementById('examFiltersToggle');
                 const examFiltersPanel = document.getElementById('examFiltersPanel');
 
@@ -913,6 +1462,30 @@
                 if (manualQuestionModalElement && shouldOpenManualQuestionModal) {
                     const manualQuestionModal = new window.bootstrap.Modal(manualQuestionModalElement);
                     manualQuestionModal.show();
+                }
+
+                if (@json($errors->manualQuestionEdit->any())) {
+                    const editModalElement = document.getElementById('editManualQuestionModal');
+                    if (editModalElement) {
+                        const editModal = new window.bootstrap.Modal(editModalElement);
+                        editModal.show();
+                    }
+
+                    fillEditManualQuestionForm({
+                        id: @json(old('edit_question_id')),
+                        question_text: @json(old('edit_question_text')),
+                        question_type: @json(old('edit_question_type', 'multiple_choice')),
+                        correct_answer: @json(old('edit_correct_answer')),
+                        explanation: @json(old('edit_explanation')),
+                        points: @json(old('edit_points', 1)),
+                        temporizador_segundos: @json(old('edit_temporizador_segundos', 30)),
+                        timer_enabled: @json((string) old('edit_timer_enabled', '0') === '1'),
+                        option_a: @json(old('edit_option_a')),
+                        option_b: @json(old('edit_option_b')),
+                        option_c: @json(old('edit_option_c')),
+                        option_d: @json(old('edit_option_d')),
+                        correct_option: @json(old('edit_correct_option')),
+                    });
                 }
 
                 if (@json($errors->manualExamRename->any())) {

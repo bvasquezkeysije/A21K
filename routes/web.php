@@ -44,12 +44,16 @@ Route::middleware(['auth'])->group(function () {
     Route::patch('/ia/exams/{exam}/name', [AiController::class, 'updateManualExamName'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.update-name');
     Route::get('/ia/exams/{exam}/manual', [AiController::class, 'showManualExamBuilder'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.manual.show');
     Route::post('/ia/exams/{exam}/manual/questions', [AiController::class, 'storeManualExamQuestion'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.manual.questions.store');
+    Route::patch('/ia/exams/{exam}/manual/questions/{question}', [AiController::class, 'updateManualExamQuestion'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.manual.questions.update');
     Route::delete('/ia/exams/{exam}', [AiController::class, 'destroyExam'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.destroy');
     Route::post('/ia/exams', [AiController::class, 'storeExam'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.store');
+    Route::patch('/ia/exams/{exam}/practice/settings', [AiController::class, 'updateExamPracticeSettings'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.practice.settings.update');
     Route::post('/ia/exams/{exam}/practice/start', [AiController::class, 'startExamPractice'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.practice.start');
+    Route::post('/ia/exams/{exam}/practice/{attempt}/retry-incorrect', [AiController::class, 'retryIncorrectExamPractice'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.practice.retry-incorrect');
     Route::get('/ia/exams/{exam}/practice/{attempt}/question/{position}', [AiController::class, 'showExamPracticeQuestion'])->middleware('permission:portal.forms.view')->whereNumber('position')->name('portal.ai.exams.practice.question');
     Route::post('/ia/exams/{exam}/practice/{attempt}/question/{position}', [AiController::class, 'submitExamPracticeQuestion'])->middleware('permission:portal.forms.view')->whereNumber('position')->name('portal.ai.exams.practice.answer');
     Route::get('/ia/exams/{exam}/practice/{attempt}/result', [AiController::class, 'showExamPracticeResult'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.practice.result');
+    Route::get('/ia/exams/{exam}/practice/{attempt}/download', [AiController::class, 'downloadExamPracticeResult'])->middleware('permission:portal.forms.view')->name('portal.ai.exams.practice.download');
     Route::get('/examenes', [AiController::class, 'examsIndex'])->middleware('permission:portal.forms.view')->name('portal.forms');
     Route::redirect('/formularios', '/examenes');
     Route::view('/salas', 'pages.salas')->middleware('permission:portal.rooms.view')->name('portal.rooms');
